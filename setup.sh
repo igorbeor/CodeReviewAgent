@@ -56,10 +56,10 @@ fi
 print_header "Code Review Agent Setup"
 
 echo "This script will install the Code Review Agent in:"
-echo "  ${BLUE}$CURRENT_DIR${NC}"
+echo -e "  ${BLUE}$CURRENT_DIR${NC}"
 echo ""
 echo "Source directory:"
-echo "  ${BLUE}$SCRIPT_DIR${NC}"
+echo -e "  ${BLUE}$SCRIPT_DIR${NC}"
 echo ""
 
 # Check if .claude directory already exists
@@ -185,26 +185,26 @@ echo "Code Review Agent is now installed in your project!"
 echo ""
 echo "Next steps:"
 echo ""
-echo "1. ${YELLOW}Customize CLAUDE.md${NC}"
+echo -e "1. ${YELLOW}Customize CLAUDE.md${NC}"
 echo "   Edit .claude/CLAUDE.md to match your project's standards"
-echo "   ${BLUE}vim .claude/CLAUDE.md${NC}"
+echo -e "   ${BLUE}vim .claude/CLAUDE.md${NC}"
 echo ""
-echo "2. ${YELLOW}Test the installation${NC}"
-echo "   ${BLUE}claude \"Review this file\" path/to/your/file${NC}"
+echo -e "2. ${YELLOW}Test the installation${NC}"
+echo -e "   ${BLUE}claude \"Review this file\" path/to/your/file${NC}"
 echo ""
-echo "3. ${YELLOW}Available Skills:${NC}"
+echo -e "3. ${YELLOW}Available Skills:${NC}"
 echo "   • code-review       - Code quality and best practices"
 echo "   • security-review   - Security vulnerabilities"
 echo "   • performance-review - Performance optimization"
 echo ""
-echo "4. ${YELLOW}Usage examples:${NC}"
-echo "   ${BLUE}claude \"Review my latest changes\"${NC}"
-echo "   ${BLUE}claude \"Check for security issues in api/\"${NC}"
-echo "   ${BLUE}claude \"Find performance problems\"${NC}"
+echo -e "4. ${YELLOW}Usage examples:${NC}"
+echo -e "   ${BLUE}claude \"Review my latest changes\"${NC}"
+echo -e "   ${BLUE}claude \"Check for security issues in api/\"${NC}"
+echo -e "   ${BLUE}claude \"Find performance problems\"${NC}"
 echo ""
 
 if [ "$PROJECT_TYPE" != "unknown" ]; then
-    echo "5. ${YELLOW}Project-specific tips for $TECH_STACK:${NC}"
+    echo -e "5. ${YELLOW}Project-specific tips for $TECH_STACK:${NC}"
 
     if [ "$PROJECT_TYPE" == "python" ]; then
         echo "   • Update CLAUDE.md with your Python style guide"
@@ -223,8 +223,8 @@ if [ "$PROJECT_TYPE" != "unknown" ]; then
 fi
 
 echo "Documentation:"
-echo "  ${BLUE}$SCRIPT_DIR/docs/README.md${NC}"
-echo "  ${BLUE}$SCRIPT_DIR/docs/USAGE.md${NC}"
+echo -e "  ${BLUE}$SCRIPT_DIR/docs/README.md${NC}"
+echo -e "  ${BLUE}$SCRIPT_DIR/docs/USAGE.md${NC}"
 echo ""
 
 print_success "Happy coding! 🚀"

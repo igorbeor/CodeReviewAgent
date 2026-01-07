@@ -415,22 +415,453 @@ class RegistrationError(Exception):
     pass
 ```
 
+### Example 3: React Component Analysis
+
+**Bad Code:**
+```typescript
+// UserList.tsx
+import { useEffect, useState } from 'react';
+
+function UserList() {
+  const [users, setUsers] = useState([]);
+  const [filter, setFilter] = useState('');
+
+  useEffect(() => {
+    fetch('https://api.example.com/users')
+      .then(res => res.json())
+      .then(data => setUsers(data));
+  }, []);
+
+  const filteredUsers = users.filter(u =>
+    u.name.toLowerCase().includes(filter.toLowerCase())
+  );
+
+  return (
+    <div>
+      <input value={filter} onChange={(e) => setFilter(e.target.value)} />
+      {filteredUsers.map((user, index) => (
+        <div key={index} onClick={() => alert(user.name)}>
+          {user.name}
+        </div>
+      ))}
+    </div>
+  );
+}
+```
+
+**Issues:**
+1. ❌ **No error handling** - fetch can fail
+2. ❌ **No loading state** - poor UX
+3. ❌ **Key using index** - can cause bugs when list changes
+4. ❌ **Inline event handlers** - re-created on every render
+5. ❌ **No TypeScript types** - no type safety
+6. ❌ **No accessibility** - input lacks label, divs not semantic
+7. ❌ **Filtering on every render** - performance issue
+
+**Recommended Fix:**
+```typescript
+// types.ts
+export interface User {
+  id: string;
+  name: string;
+  email: string;
+}
+
+// UserList.tsx
+import { useEffect, useState, useMemo, useCallback } from 'react';
+import type { User } from './types';
+
+interface UserListProps {
+  apiUrl?: string;
+}
+
+export function UserList({ apiUrl = 'https://api.example.com/users' }: UserListProps) {
+  const [users, setUsers] = useState<User[]>([]);
+  const [filter, setFilter] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const fetchUsers = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+
+        const response = await fetch(apiUrl);
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+
+        if (!cancelled) {
+          setUsers(data);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : 'Failed to load users');
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    };
+
+    fetchUsers();
+
+    // Cleanup function prevents state update after unmount
+    return () => {
+      cancelled = true;
+    };
+  }, [apiUrl]);
+
+  // Memoized derived state
+  const filteredUsers = useMemo(() => {
+    const lowerFilter = filter.toLowerCase();
+    return users.filter(user =>
+      user.name.toLowerCase().includes(lowerFilter)
+    );
+  }, [users, filter]);
+
+  // Memoized callback
+  const handleUserClick = useCallback((user: User) => {
+    alert(user.name);
+  }, []);
+
+  const handleFilterChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setFilter(e.target.value);
+  }, []);
+
+  if (loading) {
+    return <div role="status" aria-live="polite">Loading users...</div>;
+  }
+
+  if (error) {
+    return (
+      <div role="alert" aria-live="assertive">
+        <strong>Error:</strong> {error}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <label htmlFor="user-filter">
+        Filter users:
+        <input
+          id="user-filter"
+          type="text"
+          value={filter}
+          onChange={handleFilterChange}
+          aria-label="Filter users by name"
+        />
+      </label>
+
+      {filteredUsers.length === 0 ? (
+        <p>No users found</p>
+      ) : (
+        <ul role="list">
+          {filteredUsers.map((user) => (
+            <li key={user.id}>
+              <button
+                onClick={() => handleUserClick(user)}
+                aria-label={`Select ${user.name}`}
+              >
+                {user.name}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+```
+
+### Example 4: Angular Component Analysis
+
+**Bad Code:**
+```typescript
+// user-profile.component.ts
+import { Component } from '@angular/core';
+import { ActivatedRoute } from '@angular/router';
+
+@Component({
+  selector: 'app-user-profile',
+  template: `
+    <div>
+      <h1>{{ user.name }}</h1>
+      <p>{{ user.email }}</p>
+      <button (click)="updateUser()">Update</button>
+    </div>
+  `
+})
+export class UserProfileComponent {
+  user: any;
+
+  constructor(private route: ActivatedRoute) {
+    this.loadUser();
+  }
+
+  loadUser() {
+    const id = this.route.snapshot.params['id'];
+    fetch('/api/user/' + id)
+      .then(res => res.json())
+      .then(data => this.user = data);
+  }
+
+  updateUser() {
+    fetch('/api/user/' + this.user.id, {
+      method: 'PUT',
+      body: JSON.stringify(this.user)
+    });
+  }
+}
+```
+
+**Issues:**
+1. ❌ **No error handling** - fetch can fail silently
+2. ❌ **Using `any` type** - no type safety
+3. ❌ **No loading/error states** - poor UX
+4. ❌ **Not using HttpClient** - should use Angular's HTTP service
+5. ❌ **No unsubscribe** - potential memory leak
+6. ❌ **No dependency injection** - fetch instead of service
+7. ❌ **Template in component** - should be separate file
+
+**Recommended Fix:**
+```typescript
+// models/user.model.ts
+export interface User {
+  id: string;
+  name: string;
+  email: string;
+}
+
+// services/user.service.ts
+import { Injectable } from '@angular/core';
+import { HttpClient, HttpErrorResponse } from '@angular/common/http';
+import { Observable, throwError } from 'rxjs';
+import { catchError, retry } from 'rxjs/operators';
+import { User } from '../models/user.model';
+
+@Injectable({
+  providedIn: 'root'
+})
+export class UserService {
+  private apiUrl = '/api/user';
+
+  constructor(private http: HttpClient) {}
+
+  getUser(id: string): Observable<User> {
+    return this.http.get<User>(`${this.apiUrl}/${id}`).pipe(
+      retry(2), // Retry failed requests
+      catchError(this.handleError)
+    );
+  }
+
+  updateUser(user: User): Observable<User> {
+    return this.http.put<User>(`${this.apiUrl}/${user.id}`, user).pipe(
+      catchError(this.handleError)
+    );
+  }
+
+  private handleError(error: HttpErrorResponse): Observable<never> {
+    let errorMessage = 'An error occurred';
+
+    if (error.error instanceof ErrorEvent) {
+      // Client-side error
+      errorMessage = error.error.message;
+    } else {
+      // Server-side error
+      errorMessage = `Error Code: ${error.status}\nMessage: ${error.message}`;
+    }
+
+    console.error(errorMessage);
+    return throwError(() => new Error(errorMessage));
+  }
+}
+
+// user-profile.component.ts
+import { Component, OnInit, OnDestroy } from '@angular/core';
+import { ActivatedRoute } from '@angular/router';
+import { Subject } from 'rxjs';
+import { takeUntil, finalize } from 'rxjs/operators';
+import { User } from '../../models/user.model';
+import { UserService } from '../../services/user.service';
+
+@Component({
+  selector: 'app-user-profile',
+  templateUrl: './user-profile.component.html',
+  styleUrls: ['./user-profile.component.scss']
+})
+export class UserProfileComponent implements OnInit, OnDestroy {
+  user: User | null = null;
+  loading = false;
+  updating = false;
+  error: string | null = null;
+
+  private destroy$ = new Subject<void>();
+
+  constructor(
+    private route: ActivatedRoute,
+    private userService: UserService
+  ) {}
+
+  ngOnInit(): void {
+    this.loadUser();
+  }
+
+  ngOnDestroy(): void {
+    // Clean up subscriptions
+    this.destroy$.next();
+    this.destroy$.complete();
+  }
+
+  loadUser(): void {
+    const userId = this.route.snapshot.params['id'];
+
+    if (!userId) {
+      this.error = 'User ID is missing';
+      return;
+    }
+
+    this.loading = true;
+    this.error = null;
+
+    this.userService.getUser(userId).pipe(
+      takeUntil(this.destroy$),
+      finalize(() => this.loading = false)
+    ).subscribe({
+      next: (user) => {
+        this.user = user;
+      },
+      error: (err) => {
+        this.error = err.message || 'Failed to load user';
+      }
+    });
+  }
+
+  updateUser(): void {
+    if (!this.user) return;
+
+    this.updating = true;
+    this.error = null;
+
+    this.userService.updateUser(this.user).pipe(
+      takeUntil(this.destroy$),
+      finalize(() => this.updating = false)
+    ).subscribe({
+      next: (updatedUser) => {
+        this.user = updatedUser;
+      },
+      error: (err) => {
+        this.error = err.message || 'Failed to update user';
+      }
+    });
+  }
+}
+```
+
+```html
+<!-- user-profile.component.html -->
+<div class="user-profile">
+  <!-- Loading state -->
+  <div *ngIf="loading" role="status" aria-live="polite">
+    Loading user profile...
+  </div>
+
+  <!-- Error state -->
+  <div *ngIf="error && !loading" role="alert" aria-live="assertive" class="error">
+    <strong>Error:</strong> {{ error }}
+  </div>
+
+  <!-- Content -->
+  <div *ngIf="user && !loading">
+    <h1>{{ user.name }}</h1>
+    <p>{{ user.email }}</p>
+
+    <button
+      (click)="updateUser()"
+      [disabled]="updating"
+      [attr.aria-busy]="updating"
+    >
+      {{ updating ? 'Updating...' : 'Update' }}
+    </button>
+  </div>
+</div>
+```
+
+```scss
+// user-profile.component.scss
+.user-profile {
+  padding: 1rem;
+
+  .error {
+    color: red;
+    padding: 0.5rem;
+    border: 1px solid red;
+    border-radius: 4px;
+  }
+}
+```
+
 ## Review Checklist
 
-Use this checklist for each file:
+### Universal Checklist (Backend + Frontend)
+
+Use this checklist for all code:
 
 - [ ] **Names** - variables, functions, classes have descriptive names
-- [ ] **Function length** - up to 20-25 lines
+- [ ] **Function/method length** - up to 20-25 lines (excluding docstrings/templates)
 - [ ] **Complexity** - cyclomatic complexity < 7
 - [ ] **DRY** - no code duplication
-- [ ] **SOLID** - principles are followed
-- [ ] **Error handling** - errors are handled correctly
-- [ ] **Type hints** - types are specified (for Python/TypeScript)
-- [ ] **Docstrings** - public functions/classes are documented
+- [ ] **Error handling** - errors are handled correctly with proper types
+- [ ] **Documentation** - public APIs/functions are documented
 - [ ] **Tests** - tests exist for new functionality
 - [ ] **Security** - no obvious vulnerabilities
 - [ ] **Performance** - no obvious performance issues
-- [ ] **Dependencies** - new dependencies are justified
+- [ ] **Dependencies** - new dependencies are justified and secure
+- [ ] **Code organization** - logical file/folder structure
+- [ ] **Consistency** - follows project conventions
+
+### Backend-Specific Checklist
+
+- [ ] **Type hints** - all functions have Python type hints
+- [ ] **SOLID principles** - Single Responsibility, Dependency Inversion, etc.
+- [ ] **Database queries** - optimized, no N+1 problems
+- [ ] **API design** - RESTful conventions, proper HTTP methods
+- [ ] **Authentication** - proper JWT/session handling
+- [ ] **Authorization** - permission checks on sensitive operations
+- [ ] **Input validation** - Pydantic models for all inputs
+- [ ] **SQL injection** - parameterized queries only
+- [ ] **Connection pooling** - database connections properly managed
+- [ ] **Async/await** - proper use for I/O operations
+- [ ] **Logging** - structured logging without sensitive data
+- [ ] **Environment config** - no hardcoded secrets
+
+### Frontend-Specific Checklist
+
+- [ ] **TypeScript** - proper types, no `any` without justification
+- [ ] **Component size** - components are focused and small (< 200 lines)
+- [ ] **Props/Input validation** - TypeScript interfaces defined
+- [ ] **Hooks rules** - hooks called at top level, not conditionally (React)
+- [ ] **Keys in lists** - unique, stable keys (not array index)
+- [ ] **Accessibility** - ARIA labels, semantic HTML, keyboard navigation
+- [ ] **Loading states** - loading indicators for async operations
+- [ ] **Error states** - error messages displayed to users
+- [ ] **Memoization** - expensive calculations memoized
+- [ ] **Event handlers** - callbacks optimized to prevent re-renders
+- [ ] **Unsubscribe/cleanup** - subscriptions/effects properly cleaned up
+- [ ] **CSS/Styles** - styles properly scoped (modules/component styles)
+- [ ] **Responsive** - works on mobile and desktop
+- [ ] **Bundle size** - lazy loading for large components
+- [ ] **State management** - appropriate (local vs global store)
+- [ ] **Dependency injection** - services injected, not instantiated (Angular)
+- [ ] **RxJS** - proper use of operators and unsubscribe (Angular)
 
 ## Project Adaptation
 

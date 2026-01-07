@@ -935,6 +935,365 @@ db.execute(query, (email,))
 - [ ] SOC 2 - Security controls
 ```
 
+## Frontend-Specific Security
+
+### Cross-Site Scripting (XSS)
+
+#### React XSS
+
+**Common vulnerabilities:**
+```typescript
+// BAD - Direct HTML injection (dangerouslySetInnerHTML)
+function UserComment({ comment }: Props) {
+  return <div dangerouslySetInnerHTML={{ __html: comment }} />;  // XSS!
+}
+
+// BAD - Using href with javascript:
+function Link({ url }: Props) {
+  return <a href={url}>Click</a>;  // If url='javascript:alert(1)', XSS!
+}
+
+// GOOD - React auto-escapes
+function UserComment({ comment }: Props) {
+  return <div>{comment}</div>;  // Automatically escaped
+}
+
+// GOOD - Sanitize if HTML is needed
+import DOMPurify from 'dompurify';
+
+function UserComment({ comment }: Props) {
+  const sanitized = DOMPurify.sanitize(comment);
+  return <div dangerouslySetInnerHTML={{ __html: sanitized }} />;
+}
+
+// GOOD - Validate URLs
+function Link({ url }: Props) {
+  const isValidUrl = url.startsWith('http://') || url.startsWith('https://');
+  const safeUrl = isValidUrl ? url : '#';
+  return <a href={safeUrl}>Click</a>;
+}
+```
+
+#### Angular XSS
+
+```typescript
+// BAD - Bypassing sanitization
+import { DomSanitizer } from '@angular/platform-browser';
+
+@Component({
+  template: `<div [innerHTML]="trustHtml(userInput)"></div>`
+})
+export class UnsafeComponent {
+  constructor(private sanitizer: DomSanitizer) {}
+
+  trustHtml(html: string) {
+    return this.sanitizer.bypassSecurityTrustHtml(html);  // DANGEROUS!
+  }
+}
+
+// GOOD - Let Angular sanitize
+@Component({
+  template: `<div [innerHTML]="userInput"></div>`  // Auto-sanitized
+})
+export class SafeComponent {
+  userInput: string;
+}
+
+// GOOD - Use text binding
+@Component({
+  template: `<div>{{ userInput }}</div>`  // Safest
+})
+export class SafestComponent {
+  userInput: string;
+}
+```
+
+### Content Security Policy (CSP)
+
+```html
+<!-- GOOD - Strict CSP -->
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'self';
+               script-src 'self';
+               style-src 'self' 'unsafe-inline';
+               img-src 'self' data: https:;
+               font-src 'self';
+               connect-src 'self' https://api.example.com;
+               frame-ancestors 'none';
+               base-uri 'self';
+               form-action 'self'">
+```
+
+**Server-side CSP (preferred):**
+```typescript
+// Express/Node.js
+app.use((req, res, next) => {
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'self'; script-src 'self'; object-src 'none'"
+  );
+  next();
+});
+```
+
+### Secure Storage
+
+#### localStorage/sessionStorage Risks
+
+```typescript
+// BAD - Storing sensitive data in localStorage
+localStorage.setItem('authToken', token);  // Accessible to XSS!
+localStorage.setItem('userId', user.id);
+localStorage.setItem('creditCard', cardNumber);  // NEVER!
+
+// GOOD - Use httpOnly cookies for auth tokens
+// Set by server:
+// Set-Cookie: token=...; HttpOnly; Secure; SameSite=Strict
+
+// GOOD - If you must use localStorage, encrypt sensitive data
+import CryptoJS from 'crypto-js';
+
+const encryptionKey = await getKeyFromSecureSource();
+
+function setSecureItem(key: string, value: string) {
+  const encrypted = CryptoJS.AES.encrypt(value, encryptionKey).toString();
+  localStorage.setItem(key, encrypted);
+}
+
+function getSecureItem(key: string): string | null {
+  const encrypted = localStorage.getItem(key);
+  if (!encrypted) return null;
+
+  const decrypted = CryptoJS.AES.decrypt(encrypted, encryptionKey);
+  return decrypted.toString(CryptoJS.enc.Utf8);
+}
+
+// BETTER - Don't store sensitive data client-side at all
+```
+
+### CSRF Protection in Frontend
+
+```typescript
+// React/Fetch - Include CSRF token
+function updateUser(user: User) {
+  const csrfToken = document.querySelector<HTMLMetaElement>(
+    'meta[name="csrf-token"]'
+  )?.content;
+
+  return fetch('/api/user', {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-CSRF-Token': csrfToken || ''
+    },
+    body: JSON.stringify(user),
+    credentials: 'same-origin'  // Include cookies
+  });
+}
+
+// Angular - HttpClient includes XSRF token automatically
+import { HttpClient } from '@angular/common/http';
+
+@Injectable()
+export class UserService {
+  constructor(private http: HttpClient) {}
+
+  updateUser(user: User): Observable<User> {
+    // Angular automatically includes X-XSRF-TOKEN header
+    return this.http.put<User>('/api/user', user);
+  }
+}
+```
+
+### API Key Exposure
+
+```typescript
+// BAD - Hardcoded API keys
+const API_KEY = 'sk_live_abc123xyz';  // Exposed in bundle!
+
+fetch(`https://api.service.com/data?api_key=${API_KEY}`);
+
+// BAD - API key in client-side code
+const config = {
+  apiKey: process.env.REACT_APP_API_KEY  // Still exposed!
+};
+
+// GOOD - Use backend proxy
+// Frontend calls your backend:
+fetch('/api/proxy/external-service');
+
+// Backend forwards request with API key:
+// app.get('/api/proxy/external-service', async (req, res) => {
+//   const response = await fetch('https://api.service.com/data', {
+//     headers: { 'Authorization': `Bearer ${process.env.API_KEY}` }
+//   });
+//   res.json(await response.json());
+// });
+
+// GOOD - Public keys only (for services that support it)
+const stripePublicKey = process.env.REACT_APP_STRIPE_PUBLIC_KEY;  // OK, it's public
+```
+
+### Dependency Vulnerabilities
+
+```bash
+# BAD - Not checking dependencies
+npm install some-package
+
+# GOOD - Audit before installing
+npm audit
+npm audit fix
+
+# GOOD - Check specific package
+npm audit --package=some-package
+
+# GOOD - Use tools
+npm install -g snyk
+snyk test
+
+# GOOD - Automated monitoring
+# Use Dependabot, Snyk, or similar in CI/CD
+```
+
+```json
+// package.json - Pin versions
+{
+  "dependencies": {
+    "react": "18.2.0",  // Exact version, not ^18.2.0
+    "react-dom": "18.2.0"
+  }
+}
+```
+
+### Secure Third-Party Scripts
+
+```html
+<!-- BAD - Loading scripts without integrity check -->
+<script src="https://cdn.example.com/library.js"></script>
+
+<!-- GOOD - Subresource Integrity (SRI) -->
+<script
+  src="https://cdn.example.com/library.js"
+  integrity="sha384-abc123..."
+  crossorigin="anonymous">
+</script>
+
+<!-- GOOD - Self-host critical libraries -->
+<script src="/vendor/react.min.js"></script>
+```
+
+### Clickjacking Protection
+
+```typescript
+// Express/Node.js - Prevent iframe embedding
+app.use((req, res, next) => {
+  res.setHeader('X-Frame-Options', 'DENY');
+  // Or allow specific origins:
+  // res.setHeader('X-Frame-Options', 'ALLOW-FROM https://trusted.com');
+  next();
+});
+
+// Alternative - CSP frame-ancestors
+res.setHeader(
+  'Content-Security-Policy',
+  "frame-ancestors 'none'"  // or 'self' or specific origins
+);
+```
+
+### PII and Sensitive Data Leakage
+
+```typescript
+// BAD - Logging sensitive data
+console.log('User data:', { email, password, ssn });  // Exposed in logs!
+
+try {
+  await updateUser(user);
+} catch (error) {
+  console.error('Error:', error, user);  // Might log PII!
+}
+
+// GOOD - Redact sensitive data
+function redactSensitive<T extends object>(obj: T): Partial<T> {
+  const sensitive = ['password', 'ssn', 'creditCard', 'token'];
+  const redacted = { ...obj };
+
+  for (const key of Object.keys(redacted)) {
+    if (sensitive.includes(key)) {
+      redacted[key] = '[REDACTED]';
+    }
+  }
+
+  return redacted;
+}
+
+console.log('User data:', redactSensitive(user));
+
+// GOOD - Structured logging without PII
+logger.info('User update', {
+  userId: user.id,  // ID is OK
+  action: 'update',
+  timestamp: Date.now()
+  // Don't log email, name, or other PII
+});
+```
+
+### Prototype Pollution
+
+```typescript
+// BAD - Vulnerable merge function
+function merge(target: any, source: any) {
+  for (const key in source) {
+    target[key] = source[key];  // Can pollute prototype!
+  }
+  return target;
+}
+
+const malicious = JSON.parse('{"__proto__": {"isAdmin": true}}');
+merge({}, malicious);  // Pollutes Object.prototype!
+
+// GOOD - Use safe libraries
+import merge from 'lodash/merge';  // Has protection
+
+// GOOD - Avoid hasOwnProperty vulnerability
+const obj = JSON.parse(userInput);
+if (Object.prototype.hasOwnProperty.call(obj, 'key')) {
+  // Safe
+}
+
+// GOOD - Create objects without prototype
+const safeObj = Object.create(null);
+```
+
+### Open Redirect
+
+```typescript
+// BAD - Unvalidated redirect
+function handleLogin(returnUrl: string) {
+  // After successful login:
+  window.location.href = returnUrl;  // Can redirect to attacker site!
+}
+
+// GOOD - Validate redirect URL
+function isValidRedirect(url: string): boolean {
+  try {
+    const parsed = new URL(url, window.location.origin);
+
+    // Only allow same-origin redirects
+    return parsed.origin === window.location.origin;
+  } catch {
+    return false;
+  }
+}
+
+function handleLogin(returnUrl: string) {
+  if (isValidRedirect(returnUrl)) {
+    window.location.href = returnUrl;
+  } else {
+    window.location.href = '/dashboard';  // Default safe redirect
+  }
+}
+```
+
 ## Tools Integration
 
 **Use Bash tool to run security scanners:**
@@ -943,10 +1302,12 @@ db.execute(query, (email,))
 # Static analysis
 bandit -r . -f json  # Python
 semgrep --config=auto .  # Multi-language
+eslint . --ext .ts,.tsx  # JavaScript/TypeScript
 
 # Dependency check
 pip-audit  # Python
 npm audit  # Node.js
+yarn audit  # Yarn
 
 # Secrets detection
 trufflehog git file://.
@@ -954,6 +1315,10 @@ gitleaks detect
 
 # SAST
 sonarqube scanner
+
+# Frontend-specific
+npm install -g snyk
+snyk test  # Vulnerability scanning
 ```
 
 ## Project-Specific Security Rules

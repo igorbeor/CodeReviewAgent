@@ -704,9 +704,432 @@ stmt = select(Post).options(selectinload(Post.author))
 - Streaming for large exports
 ```
 
+## Frontend-Specific Performance
+
+### Bundle Size Optimization
+
+```typescript
+// BAD - Importing entire library
+import _ from 'lodash';  // 70KB!
+import moment from 'moment';  // 67KB!
+
+const result = _.debounce(fn, 300);
+const date = moment().format('YYYY-MM-DD');
+
+// GOOD - Import only what you need
+import debounce from 'lodash/debounce';  // 2KB
+import { format } from 'date-fns';  // 12KB
+
+const result = debounce(fn, 300);
+const date = format(new Date(), 'yyyy-MM-dd');
+
+// GOOD - Tree-shaking friendly imports
+import { debounce } from 'lodash-es';  // Only includes what's used
+```
+
+### Code Splitting & Lazy Loading
+
+**React:**
+```typescript
+// BAD - Import all components upfront
+import HeavyChart from './HeavyChart';
+import HeavyTable from './HeavyTable';
+import HeavyEditor from './HeavyEditor';
+
+// Bundle size: 500KB
+
+// GOOD - Lazy load components
+const HeavyChart = lazy(() => import('./HeavyChart'));
+const HeavyTable = lazy(() => import('./HeavyTable'));
+const HeavyEditor = lazy(() => import('./HeavyEditor'));
+
+function App() {
+  return (
+    <Suspense fallback={<LoadingSpinner />}>
+      <Routes>
+        <Route path="/chart" element={<HeavyChart />} />
+        <Route path="/table" element={<HeavyTable />} />
+        <Route path="/editor" element={<HeavyEditor />} />
+      </Routes>
+    </Suspense>
+  );
+}
+
+// Initial bundle: 100KB, chunks loaded on demand
+```
+
+**Angular:**
+```typescript
+// BAD - Eager loading
+const routes: Routes = [
+  { path: 'admin', component: AdminComponent },
+  { path: 'reports', component: ReportsComponent }
+];
+
+// GOOD - Lazy loading modules
+const routes: Routes = [
+  {
+    path: 'admin',
+    loadChildren: () => import('./admin/admin.module').then(m => m.AdminModule)
+  },
+  {
+    path: 'reports',
+    loadChildren: () => import('./reports/reports.module').then(m => m.ReportsModule)
+  }
+];
+```
+
+### Image Optimization
+
+```typescript
+// BAD - Large unoptimized images
+<img src="/images/hero.jpg" alt="Hero" />  // 5MB JPEG!
+
+// GOOD - Responsive images with modern formats
+<picture>
+  <source srcSet="/images/hero.webp" type="image/webp" />
+  <source srcSet="/images/hero.jpg" type="image/jpeg" />
+  <img
+    src="/images/hero.jpg"
+    srcSet="/images/hero-320w.jpg 320w,
+            /images/hero-640w.jpg 640w,
+            /images/hero-1280w.jpg 1280w"
+    sizes="(max-width: 320px) 280px,
+           (max-width: 640px) 600px,
+           1200px"
+    alt="Hero"
+    loading="lazy"
+    width="1200"
+    height="600"
+  />
+</picture>
+
+// GOOD - Next.js Image component (auto-optimization)
+import Image from 'next/image';
+
+<Image
+  src="/images/hero.jpg"
+  alt="Hero"
+  width={1200}
+  height={600}
+  priority  // For above-fold images
+/>
+```
+
+### Prevent Unnecessary Re-renders
+
+**React:**
+```typescript
+// BAD - Component re-renders on every parent render
+function UserList({ users }: Props) {
+  return (
+    <ul>
+      {users.map(user => (
+        <UserItem key={user.id} user={user} />
+      ))}
+    </ul>
+  );
+}
+
+function UserItem({ user }: {user: User}) {
+  console.log('Rendering:', user.name);  // Logs on every parent update!
+  return <li>{user.name}</li>;
+}
+
+// GOOD - Memoize component
+const UserItem = memo(function UserItem({ user }: {user: User}) {
+  console.log('Rendering:', user.name);  // Only logs when user changes
+  return <li>{user.name}</li>;
+});
+
+// GOOD - Memoize expensive calculations
+function ProductList({ products }: Props) {
+  // BAD - Recalculates on every render
+  const total = products.reduce((sum, p) => sum + p.price, 0);
+
+  // GOOD - Only recalculates when products change
+  const total = useMemo(
+    () => products.reduce((sum, p) => sum + p.price, 0),
+    [products]
+  );
+
+  return <div>Total: ${total}</div>;
+}
+```
+
+**Angular:**
+```typescript
+// BAD - Default change detection (checks everything)
+@Component({
+  selector: 'app-user-list',
+  template: `
+    <div *ngFor="let user of users">
+      {{ user.name }}
+    </div>
+  `
+})
+export class UserListComponent {
+  @Input() users: User[];
+}
+
+// GOOD - OnPush change detection
+@Component({
+  selector: 'app-user-list',
+  template: `
+    <div *ngFor="let user of users; trackBy: trackByUserId">
+      {{ user.name }}
+    </div>
+  `,
+  changeDetection: ChangeDetectionStrategy.OnPush
+})
+export class UserListComponent {
+  @Input() users: User[];
+
+  trackByUserId(index: number, user: User): string {
+    return user.id;
+  }
+}
+```
+
+### Virtual Scrolling / Windowing
+
+```typescript
+// BAD - Rendering 10,000 items in DOM
+function LargeList({ items }: { items: Item[] }) {
+  return (
+    <div style={{ height: '600px', overflow: 'auto' }}>
+      {items.map(item => (
+        <div key={item.id} style={{ height: '50px' }}>
+          {item.name}
+        </div>
+      ))}
+    </div>
+  );
+}
+// DOM nodes: 10,000!  Performance: 💀
+
+// GOOD - Virtual scrolling (react-window)
+import { FixedSizeList } from 'react-window';
+
+function LargeList({ items }: { items: Item[] }) {
+  return (
+    <FixedSizeList
+      height={600}
+      itemCount={items.length}
+      itemSize={50}
+      width="100%"
+    >
+      {({ index, style }) => (
+        <div style={style}>
+          {items[index].name}
+        </div>
+      )}
+    </FixedSizeList>
+  );
+}
+// DOM nodes: ~20  Performance: ⚡
+```
+
+### Web Vitals Optimization
+
+**Largest Contentful Paint (LCP) - Target: < 2.5s**
+```typescript
+// BAD - Large image blocks LCP
+<img src="/hero.jpg" width="1200" height="600" />  // 3MB, loads in 4s
+
+// GOOD - Optimize critical images
+<img
+  src="/hero-optimized.webp"  // 200KB, loads in 0.5s
+  width="1200"
+  height="600"
+  fetchpriority="high"  // Prioritize loading
+  decoding="async"
+/>
+
+// GOOD - Preload critical resources
+<link rel="preload" as="image" href="/hero-optimized.webp" />
+```
+
+**First Input Delay (FID) - Target: < 100ms**
+```typescript
+// BAD - Long task blocks main thread
+function processData(data: large) {
+  // 500ms synchronous processing
+  return data.map(item => heavyComputation(item));
+}
+
+// GOOD - Break into chunks
+async function processData(data: large) {
+  const results = [];
+  for (let i = 0; i < data.length; i++) {
+    results.push(heavyComputation(data[i]));
+
+    // Yield to browser every 50 items
+    if (i % 50 === 0) {
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+  }
+  return results;
+}
+
+// BETTER - Use Web Workers
+const worker = new Worker('processor.worker.js');
+worker.postMessage(data);
+worker.onmessage = (e) => {
+  const results = e.data;
+};
+```
+
+**Cumulative Layout Shift (CLS) - Target: < 0.1**
+```typescript
+// BAD - Images without dimensions cause layout shift
+<img src="/avatar.jpg" />  // CLS: 0.25
+
+// GOOD - Always specify dimensions
+<img src="/avatar.jpg" width="100" height="100" />  // CLS: 0
+
+// GOOD - Reserve space with aspect ratio
+<div style={{ aspectRatio: '16/9' }}>
+  <img src="/video-thumbnail.jpg" style={{ width: '100%', height: 'auto' }} />
+</div>
+```
+
+### Memory Leaks
+
+**React:**
+```typescript
+// BAD - Event listener not cleaned up
+function Component() {
+  useEffect(() => {
+    const handleResize = () => console.log('resized');
+    window.addEventListener('resize', handleResize);
+    // Missing cleanup!
+  }, []);
+
+  return <div>Content</div>;
+}
+
+// GOOD - Cleanup event listeners
+function Component() {
+  useEffect(() => {
+    const handleResize = () => console.log('resized');
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+    };
+  }, []);
+
+  return <div>Content</div>;
+}
+
+// BAD - Timer not cleared
+function Component() {
+  useEffect(() => {
+    const timer = setInterval(() => fetchData(), 5000);
+    // Missing cleanup!
+  }, []);
+}
+
+// GOOD - Clear timers
+function Component() {
+  useEffect(() => {
+    const timer = setInterval(() => fetchData(), 5000);
+
+    return () => {
+      clearInterval(timer);
+    };
+  }, []);
+}
+```
+
+### Debouncing & Throttling
+
+```typescript
+// BAD - Handler fires on every keystroke
+function SearchInput() {
+  const [query, setQuery] = useState('');
+
+  const handleChange = (e: ChangeEvent<HTMLInputElement>) => {
+    setQuery(e.target.value);
+    fetchResults(e.target.value);  // API call on every keystroke!
+  };
+
+  return <input onChange={handleChange} />;
+}
+
+// GOOD - Debounced search
+import { useDebouncedCallback } from 'use-debounce';
+
+function SearchInput() {
+  const [query, setQuery] = useState('');
+
+  const debouncedSearch = useDebouncedCallback(
+    (value: string) => {
+      fetchResults(value);
+    },
+    500  // Wait 500ms after last keystroke
+  );
+
+  const handleChange = (e: ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setQuery(value);
+    debouncedSearch(value);
+  };
+
+  return <input value={query} onChange={handleChange} />;
+}
+```
+
+### CSS Performance
+
+```css
+/* BAD - Expensive selectors */
+* {  /* Matches everything! */
+  box-sizing: border-box;
+}
+
+div > div > div > .class {  /* Deep nesting */
+  color: red;
+}
+
+[data-attribute*="value"] {  /* Complex attribute selector */
+  margin: 0;
+}
+
+/* GOOD - Efficient selectors */
+.container {
+  box-sizing: border-box;
+}
+
+.specific-class {  /* Direct class selector */
+  color: red;
+}
+
+/* BAD - Triggering layout/reflow */
+.animated {
+  animation: move 1s;
+}
+
+@keyframes move {
+  from { top: 0; }  /* Triggers layout! */
+  to { top: 100px; }
+}
+
+/* GOOD - Use transform (GPU accelerated) */
+.animated {
+  animation: move 1s;
+}
+
+@keyframes move {
+  from { transform: translateY(0); }  /* Composite only */
+  to { transform: translateY(100px); }
+}
+```
+
 ## Tools for Performance Analysis
 
-**Use Bash tool to run profilers:**
+**Backend Tools:**
 
 ```bash
 # Python profiling
@@ -718,8 +1141,6 @@ pip install memory-profiler
 python -m memory_profiler script.py
 
 # Database query analysis
-# Enable slow query log in PostgreSQL
-# Check execution plans
 EXPLAIN ANALYZE SELECT ...
 
 # Load testing
@@ -727,9 +1148,37 @@ pip install locust
 locust -f locustfile.py
 
 # API benchmarking
-pip install wrk
 wrk -t12 -c400 -d30s http://localhost:8000/api/endpoint
 ```
+
+**Frontend Tools:**
+
+```bash
+# Bundle analysis
+npm install --save-dev webpack-bundle-analyzer
+npx webpack-bundle-analyzer dist/stats.json
+
+# Lighthouse CI
+npm install -g @lhci/cli
+lhci autorun
+
+# Web Vitals measurement
+npm install web-vitals
+
+# Performance testing
+npm install -g lighthouse
+lighthouse https://example.com --view
+
+# Bundle size check
+npm install --save-dev size-limit
+npx size-limit
+```
+
+**Browser DevTools:**
+- **Performance tab** - Record and analyze runtime performance
+- **Coverage tab** - Find unused CSS/JS
+- **Network tab** - Check asset sizes and load times
+- **Lighthouse** - Automated performance audits
 
 ## Project-Specific Performance Requirements
 
